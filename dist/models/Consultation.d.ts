@@ -13,6 +13,11 @@ export interface IConsultation extends Document {
     answeredAt?: Date;
     scheduledAt?: Date;
     completedAt?: Date;
+    chatStartedAt?: Date;
+    lastMessageAt?: Date;
+    customerUnreadCount: number;
+    lawyerUnreadCount: number;
+    chatStatus: 'waiting_acceptance' | 'active' | 'closed';
     createdAt: Date;
     updatedAt: Date;
 }

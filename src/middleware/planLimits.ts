@@ -50,16 +50,16 @@ export const checkConsultationLimits = async (req: Request, res: Response, next:
     let monthlyLimit: number;
     switch (plan.name.toLowerCase()) {
       case 'basic':
-        monthlyLimit = 10; // Temporarily increased for testing
+        monthlyLimit = 50; // Increased for testing
         break;
       case 'plus':
-        monthlyLimit = 5;
+        monthlyLimit = 100; // Increased for testing
         break;
       case 'complete':
         monthlyLimit = -1; // Unlimited
         break;
       default:
-        monthlyLimit = 0;
+        monthlyLimit = 10; // Default limit for testing
     }
 
     // If unlimited (complete plan), allow

@@ -453,3 +453,4 @@ router.post('/consultations/:id/complete', validateConsultationId, async (req, r
 });
 
 export default router;
+

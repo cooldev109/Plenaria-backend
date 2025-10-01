@@ -1,5 +1,5 @@
 import express from 'express';
-import { Project, Course, Consultation, Plan, User } from '../models';
+import { Project, Course, Consultation, Plan, User, Message } from '../models';
 import { authMiddleware, allRoles } from '../middleware/auth';
 import { checkConsultationLimits, checkCourseAccess, checkProjectAccess } from '../middleware/planLimits';
 import { validateConsultation } from '../middleware/validation';

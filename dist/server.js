@@ -9,7 +9,6 @@ const helmet_1 = __importDefault(require("helmet"));
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const morgan_1 = __importDefault(require("morgan"));
 const dotenv_1 = __importDefault(require("dotenv"));
-const http_1 = require("http");
 const auth_1 = __importDefault(require("./routes/auth"));
 const admin_1 = __importDefault(require("./routes/admin"));
 const lawyer_1 = __importDefault(require("./routes/lawyer"));
@@ -17,7 +16,6 @@ const customer_1 = __importDefault(require("./routes/customer"));
 const chat_1 = __importDefault(require("./routes/chat"));
 const errorHandler_1 = require("./middleware/errorHandler");
 const database_1 = require("./utils/database");
-const socketServer_1 = require("./socket/socketServer");
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
@@ -26,7 +24,6 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const FRONTEND_URLS = process.env.FRONTEND_URLS ?
     process.env.FRONTEND_URLS.split(',') :
     ['http://localhost:3000', 'http://localhost:8080', 'http://localhost:8081', 'http://localhost:3001'];
-const httpServer = (0, http_1.createServer)(app);
 app.use((0, helmet_1.default)());
 const limiter = (0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000,
@@ -69,12 +66,10 @@ app.use('/api/customer', customer_1.default);
 app.use('/api/chat', chat_1.default);
 app.use(errorHandler_1.notFound);
 app.use(errorHandler_1.errorHandler);
-let socketServer;
 async function startServer() {
     try {
         await (0, database_1.connectDatabase)();
-        socketServer = new socketServer_1.SocketServer(httpServer);
-        httpServer.listen(PORT, () => {
+        app.listen(PORT, () => {
             console.log('🚀 Plenaria Backend Server Started');
             console.log(`📡 Server running on port ${PORT}`);
             console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -88,10 +83,6 @@ async function startServer() {
             console.log('\n🔐 Initial users (after seeding):');
             console.log('  - Admin: walkerjames1127@gmail.com / futurephantom');
             console.log('  - Customer: mazenabass991@gmail.com / futurephantom');
-            console.log('\n💬 Real-time features:');
-            console.log('  - Socket.IO server initialized');
-            console.log('  - Real-time chat enabled');
-            console.log('  - Consultation rooms active');
         });
     }
     catch (error) {
@@ -101,17 +92,11 @@ async function startServer() {
 }
 process.on('SIGINT', async () => {
     console.log('\n🛑 Shutting down server...');
-    if (socketServer) {
-        await socketServer.shutdown();
-    }
     await (0, database_1.closeDatabase)();
     process.exit(0);
 });
 process.on('SIGTERM', async () => {
     console.log('\n🛑 Shutting down server...');
-    if (socketServer) {
-        await socketServer.shutdown();
-    }
     await (0, database_1.closeDatabase)();
     process.exit(0);
 });

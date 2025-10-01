@@ -4,43 +4,61 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
-const auth_1 = require("../middleware/auth");
 const models_1 = require("../models");
-const mongoose_1 = __importDefault(require("mongoose"));
+const auth_1 = require("../middleware/auth");
+const express_validator_1 = require("express-validator");
 const router = express_1.default.Router();
 router.use(auth_1.authMiddleware);
-router.get('/consultations/:consultationId/messages', auth_1.allRoles, async (req, res, next) => {
+router.use(auth_1.allRoles);
+const validateMessage = [
+    (0, express_validator_1.body)('content').trim().isLength({ min: 1, max: 5000 }).withMessage('Message content must be between 1 and 5000 characters'),
+    (0, express_validator_1.body)('messageType').optional().isIn(['text', 'file', 'system']).withMessage('Invalid message type'),
+    (0, express_validator_1.body)('attachments').optional().isArray().withMessage('Attachments must be an array')
+];
+const validateConsultationId = [
+    (0, express_validator_1.param)('id').isMongoId().withMessage('Invalid consultation ID')
+];
+router.get('/consultations/:id/messages', validateConsultationId, async (req, res, next) => {
     try {
-        const { consultationId } = req.params;
+        const errors = (0, express_validator_1.validationResult)(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors: errors.array()
+            });
+        }
+        const { id } = req.params;
         const { page = 1, limit = 50 } = req.query;
-        const consultation = await models_1.Consultation.findById(consultationId);
+        const userId = req.user._id;
+        const userRole = req.user.role;
+        const consultation = await models_1.Consultation.findById(id);
         if (!consultation) {
             return res.status(404).json({
                 success: false,
                 message: 'Consultation not found'
             });
         }
-        const hasAccess = req.user?.role === 'admin' ||
-            (req.user?.role === 'customer' && consultation.customerId.toString() === req.user._id.toString()) ||
-            (req.user?.role === 'lawyer' && consultation.lawyerId?.toString() === req.user._id.toString());
+        const hasAccess = userRole === 'admin' ||
+            (userRole === 'customer' && consultation.customerId.toString() === userId.toString()) ||
+            (userRole === 'lawyer' && consultation.lawyerId?.toString() === userId.toString());
         if (!hasAccess) {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied to this consultation'
             });
         }
-        const skip = (Number(page) - 1) * Number(limit);
-        const messages = await models_1.ChatMessage.find({
-            consultationId: new mongoose_1.default.Types.ObjectId(consultationId),
+        const messages = await models_1.Message.find({
+            consultationId: id,
             deletedAt: { $exists: false }
         })
             .populate('senderId', 'name email avatar')
-            .populate('replyTo', 'message senderId')
+            .populate('replyTo', 'content senderId')
             .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(Number(limit));
-        const totalMessages = await models_1.ChatMessage.countDocuments({
-            consultationId: new mongoose_1.default.Types.ObjectId(consultationId),
+            .limit(Number(limit) * 1)
+            .skip((Number(page) - 1) * Number(limit));
+        const total = await models_1.Message.countDocuments({
+            consultationId: id,
             deletedAt: { $exists: false }
         });
         res.json({
@@ -48,10 +66,9 @@ router.get('/consultations/:consultationId/messages', auth_1.allRoles, async (re
             data: {
                 messages: messages.reverse(),
                 pagination: {
-                    page: Number(page),
-                    limit: Number(limit),
-                    total: totalMessages,
-                    pages: Math.ceil(totalMessages / Number(limit))
+                    current: Number(page),
+                    pages: Math.ceil(total / Number(limit)),
+                    total
                 }
             }
         });
@@ -60,174 +77,293 @@ router.get('/consultations/:consultationId/messages', auth_1.allRoles, async (re
         next(error);
     }
 });
-router.post('/consultations/:consultationId/messages', auth_1.allRoles, async (req, res, next) => {
+router.post('/consultations/:id/messages', validateConsultationId, validateMessage, async (req, res, next) => {
     try {
-        const { consultationId } = req.params;
-        const { message, messageType = 'text', attachments = [], replyTo } = req.body;
-        if (!message?.trim()) {
+        const errors = (0, express_validator_1.validationResult)(req);
+        if (!errors.isEmpty()) {
             return res.status(400).json({
                 success: false,
-                message: 'Message content is required'
+                message: 'Validation failed',
+                errors: errors.array()
             });
         }
-        const consultation = await models_1.Consultation.findById(consultationId);
+        const { id } = req.params;
+        const { content, messageType = 'text', attachments = [], replyTo } = req.body;
+        const userId = req.user._id;
+        const userRole = req.user.role;
+        const consultation = await models_1.Consultation.findById(id);
         if (!consultation) {
             return res.status(404).json({
                 success: false,
                 message: 'Consultation not found'
             });
         }
-        const hasAccess = req.user?.role === 'admin' ||
-            (req.user?.role === 'customer' && consultation.customerId.toString() === req.user._id.toString()) ||
-            (req.user?.role === 'lawyer' && consultation.lawyerId?.toString() === req.user._id.toString());
+        const hasAccess = userRole === 'admin' ||
+            (userRole === 'customer' && consultation.customerId.toString() === userId.toString()) ||
+            (userRole === 'lawyer' && consultation.lawyerId?.toString() === userId.toString());
         if (!hasAccess) {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied to this consultation'
             });
         }
-        let receiverId;
-        if (req.user?.role === 'customer' && consultation.lawyerId) {
-            receiverId = consultation.lawyerId.toString();
+        if (consultation.chatStatus !== 'active' && userRole === 'customer') {
+            return res.status(400).json({
+                success: false,
+                message: 'Chat is not active yet. Wait for lawyer to accept the consultation.'
+            });
         }
-        else if (req.user?.role === 'lawyer' && consultation.customerId) {
-            receiverId = consultation.customerId.toString();
-        }
-        const chatMessage = new models_1.ChatMessage({
-            consultationId: new mongoose_1.default.Types.ObjectId(consultationId),
-            senderId: new mongoose_1.default.Types.ObjectId(req.user._id.toString()),
-            receiverId: receiverId ? new mongoose_1.default.Types.ObjectId(receiverId) : undefined,
-            message: message.trim(),
+        const message = new models_1.Message({
+            consultationId: id,
+            senderId: userId,
+            senderRole: userRole,
+            content,
             messageType,
             attachments,
-            replyTo: replyTo ? new mongoose_1.default.Types.ObjectId(replyTo) : undefined,
-            isRead: false
+            replyTo
         });
-        await chatMessage.save();
-        await chatMessage.populate('senderId', 'name email avatar');
-        if (replyTo) {
-            await chatMessage.populate('replyTo', 'message senderId');
+        await message.save();
+        const updateData = {
+            lastMessageAt: new Date()
+        };
+        if (userRole === 'customer') {
+            updateData.lawyerUnreadCount = (consultation.lawyerUnreadCount || 0) + 1;
         }
+        else if (userRole === 'lawyer') {
+            updateData.customerUnreadCount = (consultation.customerUnreadCount || 0) + 1;
+        }
+        await models_1.Consultation.findByIdAndUpdate(id, updateData);
+        const populatedMessage = await models_1.Message.findById(message._id)
+            .populate('senderId', 'name email avatar')
+            .populate('replyTo', 'content senderId');
         res.status(201).json({
             success: true,
             message: 'Message sent successfully',
-            data: { message: chatMessage }
+            data: { message: populatedMessage }
         });
     }
     catch (error) {
         next(error);
     }
 });
-router.put('/messages/:messageId/read', auth_1.allRoles, async (req, res, next) => {
+router.put('/consultations/:id/messages/read', validateConsultationId, async (req, res, next) => {
     try {
-        const { messageId } = req.params;
-        const message = await models_1.ChatMessage.findById(messageId);
-        if (!message) {
+        const errors = (0, express_validator_1.validationResult)(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors: errors.array()
+            });
+        }
+        const { id } = req.params;
+        const userId = req.user._id;
+        const userRole = req.user.role;
+        const consultation = await models_1.Consultation.findById(id);
+        if (!consultation) {
             return res.status(404).json({
                 success: false,
-                message: 'Message not found'
+                message: 'Consultation not found'
             });
         }
-        if (message.receiverId?.toString() === req.user._id.toString()) {
-            message.isRead = true;
-            message.readAt = new Date();
-            await message.save();
-        }
-        res.json({
-            success: true,
-            message: 'Message marked as read',
-            data: { message }
-        });
-    }
-    catch (error) {
-        next(error);
-    }
-});
-router.get('/messages/unread-count', auth_1.allRoles, async (req, res, next) => {
-    try {
-        const unreadCount = await models_1.ChatMessage.countDocuments({
-            receiverId: new mongoose_1.default.Types.ObjectId(req.user._id.toString()),
-            isRead: false,
-            deletedAt: { $exists: false }
-        });
-        res.json({
-            success: true,
-            data: { unreadCount }
-        });
-    }
-    catch (error) {
-        next(error);
-    }
-});
-router.get('/consultations/active', auth_1.allRoles, async (req, res, next) => {
-    try {
-        let consultations;
-        if (req.user?.role === 'customer') {
-            consultations = await models_1.Consultation.find({
-                customerId: req.user._id,
-                status: { $in: ['assigned', 'in_progress'] }
-            })
-                .populate('lawyerId', 'name email avatar')
-                .sort({ updatedAt: -1 });
-        }
-        else if (req.user?.role === 'lawyer') {
-            consultations = await models_1.Consultation.find({
-                lawyerId: req.user._id,
-                status: { $in: ['assigned', 'in_progress'] }
-            })
-                .populate('customerId', 'name email avatar')
-                .sort({ updatedAt: -1 });
-        }
-        else {
-            consultations = await models_1.Consultation.find({
-                status: { $in: ['assigned', 'in_progress'] }
-            })
-                .populate('customerId', 'name email avatar')
-                .populate('lawyerId', 'name email avatar')
-                .sort({ updatedAt: -1 });
-        }
-        const consultationsWithUnread = await Promise.all(consultations.map(async (consultation) => {
-            const unreadCount = await models_1.ChatMessage.countDocuments({
-                consultationId: consultation._id,
-                receiverId: req.user._id,
-                isRead: false,
-                deletedAt: { $exists: false }
-            });
-            return {
-                ...consultation.toObject(),
-                unreadCount
-            };
-        }));
-        res.json({
-            success: true,
-            data: { consultations: consultationsWithUnread }
-        });
-    }
-    catch (error) {
-        next(error);
-    }
-});
-router.delete('/messages/:messageId', auth_1.allRoles, async (req, res, next) => {
-    try {
-        const { messageId } = req.params;
-        const message = await models_1.ChatMessage.findById(messageId);
-        if (!message) {
-            return res.status(404).json({
-                success: false,
-                message: 'Message not found'
-            });
-        }
-        if (message.senderId.toString() !== req.user._id.toString()) {
+        const hasAccess = userRole === 'admin' ||
+            (userRole === 'customer' && consultation.customerId.toString() === userId.toString()) ||
+            (userRole === 'lawyer' && consultation.lawyerId?.toString() === userId.toString());
+        if (!hasAccess) {
             return res.status(403).json({
                 success: false,
-                message: 'You can only delete your own messages'
+                message: 'Access denied to this consultation'
             });
         }
-        message.deletedAt = new Date();
-        await message.save();
+        await models_1.Message.updateMany({
+            consultationId: id,
+            senderId: { $ne: userId },
+            isRead: false
+        }, {
+            isRead: true,
+            readAt: new Date()
+        });
+        const updateData = {};
+        if (userRole === 'customer') {
+            updateData.customerUnreadCount = 0;
+        }
+        else if (userRole === 'lawyer') {
+            updateData.lawyerUnreadCount = 0;
+        }
+        await models_1.Consultation.findByIdAndUpdate(id, updateData);
         res.json({
             success: true,
-            message: 'Message deleted successfully'
+            message: 'Messages marked as read'
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post('/consultations/:id/accept', validateConsultationId, async (req, res, next) => {
+    try {
+        const errors = (0, express_validator_1.validationResult)(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors: errors.array()
+            });
+        }
+        const { id } = req.params;
+        const userId = req.user._id;
+        const userRole = req.user.role;
+        if (userRole !== 'lawyer' && userRole !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Only lawyers can accept consultations'
+            });
+        }
+        const consultation = await models_1.Consultation.findById(id);
+        if (!consultation) {
+            return res.status(404).json({
+                success: false,
+                message: 'Consultation not found'
+            });
+        }
+        if (consultation.status !== 'pending') {
+            return res.status(400).json({
+                success: false,
+                message: 'Consultation is not in pending status'
+            });
+        }
+        consultation.lawyerId = userId;
+        consultation.status = 'assigned';
+        consultation.chatStatus = 'active';
+        consultation.chatStartedAt = new Date();
+        consultation.answeredAt = new Date();
+        await consultation.save();
+        const systemMessage = new models_1.Message({
+            consultationId: id,
+            senderId: userId,
+            senderRole: 'lawyer',
+            content: 'Consultation accepted. Chat is now active.',
+            messageType: 'system'
+        });
+        await systemMessage.save();
+        const populatedConsultation = await models_1.Consultation.findById(id)
+            .populate('customerId', 'name email')
+            .populate('lawyerId', 'name email');
+        res.json({
+            success: true,
+            message: 'Consultation accepted successfully',
+            data: { consultation: populatedConsultation }
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post('/consultations/:id/decline', validateConsultationId, [
+    (0, express_validator_1.body)('reason').optional().trim().isLength({ max: 500 }).withMessage('Reason cannot exceed 500 characters')
+], async (req, res, next) => {
+    try {
+        const errors = (0, express_validator_1.validationResult)(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors: errors.array()
+            });
+        }
+        const { id } = req.params;
+        const { reason } = req.body;
+        const userId = req.user._id;
+        const userRole = req.user.role;
+        if (userRole !== 'lawyer' && userRole !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Only lawyers can decline consultations'
+            });
+        }
+        const consultation = await models_1.Consultation.findById(id);
+        if (!consultation) {
+            return res.status(404).json({
+                success: false,
+                message: 'Consultation not found'
+            });
+        }
+        if (consultation.status !== 'pending') {
+            return res.status(400).json({
+                success: false,
+                message: 'Consultation is not in pending status'
+            });
+        }
+        consultation.status = 'cancelled';
+        consultation.chatStatus = 'closed';
+        consultation.notes = reason || 'Consultation declined by lawyer';
+        await consultation.save();
+        const systemMessage = new models_1.Message({
+            consultationId: id,
+            senderId: userId,
+            senderRole: 'lawyer',
+            content: `Consultation declined. ${reason ? `Reason: ${reason}` : ''}`,
+            messageType: 'system'
+        });
+        await systemMessage.save();
+        res.json({
+            success: true,
+            message: 'Consultation declined successfully',
+            data: { consultation }
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post('/consultations/:id/complete', validateConsultationId, async (req, res, next) => {
+    try {
+        const errors = (0, express_validator_1.validationResult)(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors: errors.array()
+            });
+        }
+        const { id } = req.params;
+        const userId = req.user._id;
+        const userRole = req.user.role;
+        if (userRole !== 'lawyer' && userRole !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Only lawyers can complete consultations'
+            });
+        }
+        const consultation = await models_1.Consultation.findById(id);
+        if (!consultation) {
+            return res.status(404).json({
+                success: false,
+                message: 'Consultation not found'
+            });
+        }
+        if (consultation.status !== 'assigned' && consultation.status !== 'in_progress') {
+            return res.status(400).json({
+                success: false,
+                message: 'Consultation is not in a completable status'
+            });
+        }
+        consultation.status = 'completed';
+        consultation.chatStatus = 'closed';
+        consultation.completedAt = new Date();
+        await consultation.save();
+        const systemMessage = new models_1.Message({
+            consultationId: id,
+            senderId: userId,
+            senderRole: 'lawyer',
+            content: 'Consultation completed successfully.',
+            messageType: 'system'
+        });
+        await systemMessage.save();
+        res.json({
+            success: true,
+            message: 'Consultation completed successfully',
+            data: { consultation }
         });
     }
     catch (error) {

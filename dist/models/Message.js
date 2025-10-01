@@ -34,90 +34,62 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const ConsultationSchema = new mongoose_1.Schema({
-    customerId: {
+const MessageSchema = new mongoose_1.Schema({
+    consultationId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'Consultation',
+        required: [true, 'Consultation ID is required']
+    },
+    senderId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'User',
-        required: [true, 'Customer ID is required']
+        required: [true, 'Sender ID is required']
     },
-    lawyerId: {
-        type: mongoose_1.Schema.Types.ObjectId,
-        ref: 'User',
-        required: false
-    },
-    subject: {
+    senderRole: {
         type: String,
-        required: [true, 'Subject is required'],
+        enum: ['customer', 'lawyer', 'admin'],
+        required: [true, 'Sender role is required']
+    },
+    content: {
+        type: String,
+        required: [true, 'Message content is required'],
         trim: true,
-        maxlength: [200, 'Subject cannot exceed 200 characters']
+        maxlength: [5000, 'Message content cannot exceed 5000 characters']
     },
-    description: {
+    messageType: {
         type: String,
-        required: [true, 'Description is required'],
-        trim: true,
-        maxlength: [2000, 'Description cannot exceed 2000 characters']
-    },
-    status: {
-        type: String,
-        enum: ['pending', 'assigned', 'in_progress', 'completed', 'cancelled'],
-        default: 'pending'
-    },
-    priority: {
-        type: String,
-        enum: ['low', 'medium', 'high', 'urgent'],
-        default: 'medium'
-    },
-    notes: {
-        type: String,
-        trim: true,
-        maxlength: [1000, 'Notes cannot exceed 1000 characters']
-    },
-    response: {
-        type: String,
-        trim: true,
-        maxlength: [5000, 'Response cannot exceed 5000 characters']
+        enum: ['text', 'file', 'system'],
+        default: 'text'
     },
     attachments: [{
             type: String,
             trim: true
         }],
-    requestedAt: {
-        type: Date,
-        default: Date.now
+    isRead: {
+        type: Boolean,
+        default: false
     },
-    answeredAt: {
+    readAt: {
         type: Date
     },
-    scheduledAt: {
+    replyTo: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'Message'
+    },
+    editedAt: {
         type: Date
     },
-    completedAt: {
+    deletedAt: {
         type: Date
-    },
-    chatStartedAt: {
-        type: Date
-    },
-    lastMessageAt: {
-        type: Date
-    },
-    customerUnreadCount: {
-        type: Number,
-        default: 0
-    },
-    lawyerUnreadCount: {
-        type: Number,
-        default: 0
-    },
-    chatStatus: {
-        type: String,
-        enum: ['waiting_acceptance', 'active', 'closed'],
-        default: 'waiting_acceptance'
     }
 }, {
     timestamps: true
 });
-ConsultationSchema.index({ customerId: 1, status: 1 });
-ConsultationSchema.index({ lawyerId: 1, status: 1 });
-ConsultationSchema.index({ createdAt: -1 });
-exports.default = mongoose_1.default.model('Consultation', ConsultationSchema);
-//# sourceMappingURL=Consultation.js.map
+MessageSchema.index({ consultationId: 1, createdAt: -1 });
+MessageSchema.index({ senderId: 1, createdAt: -1 });
+MessageSchema.index({ isRead: 1, consultationId: 1 });
+MessageSchema.virtual('isUnread').get(function () {
+    return !this.isRead;
+});
+exports.default = mongoose_1.default.model('Message', MessageSchema);
+//# sourceMappingURL=Message.js.map

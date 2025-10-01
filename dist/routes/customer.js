@@ -263,19 +263,75 @@ router.get('/consultations/:id', async (req, res, next) => {
 });
 router.post('/consultations', planLimits_1.checkConsultationLimits, validation_1.validateConsultation, async (req, res, next) => {
     try {
+        const { lawyerId, ...consultationData } = req.body;
+        if (lawyerId) {
+            const lawyer = await models_1.User.findOne({ _id: lawyerId, role: 'lawyer', isActive: true });
+            if (!lawyer) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Selected lawyer not found or not available'
+                });
+            }
+        }
         const consultation = new models_1.Consultation({
-            ...req.body,
+            ...consultationData,
             customerId: req.user._id,
-            status: 'pending',
-            requestedAt: new Date()
+            lawyerId: lawyerId || undefined,
+            status: lawyerId ? 'assigned' : 'pending',
+            chatStatus: lawyerId ? 'active' : 'waiting_acceptance',
+            requestedAt: new Date(),
+            ...(lawyerId && { chatStartedAt: new Date() })
         });
         await consultation.save();
+        if (lawyerId) {
+            const systemMessage = new models_1.Message({
+                consultationId: consultation._id,
+                senderId: lawyerId,
+                senderRole: 'lawyer',
+                content: 'Consultation request received. Chat is now active.',
+                messageType: 'system'
+            });
+            await systemMessage.save();
+        }
         const populatedConsultation = await models_1.Consultation.findById(consultation._id)
-            .populate('customerId', 'name email');
+            .populate('customerId', 'name email')
+            .populate('lawyerId', 'name email');
         res.status(201).json({
             success: true,
-            message: 'Consultation request submitted successfully',
+            message: lawyerId ? 'Consultation request sent to lawyer successfully' : 'Consultation request submitted successfully',
             data: { consultation: populatedConsultation }
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.get('/lawyers', async (req, res, next) => {
+    try {
+        const { page = 1, limit = 20, search, specialization } = req.query;
+        const query = { role: 'lawyer', isActive: true };
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { email: { $regex: search, $options: 'i' } }
+            ];
+        }
+        const lawyers = await models_1.User.find(query)
+            .select('name email role lawyerStatus isActive createdAt')
+            .sort({ createdAt: -1 })
+            .limit(Number(limit) * 1)
+            .skip((Number(page) - 1) * Number(limit));
+        const total = await models_1.User.countDocuments(query);
+        res.json({
+            success: true,
+            data: {
+                lawyers,
+                pagination: {
+                    current: Number(page),
+                    pages: Math.ceil(total / Number(limit)),
+                    total
+                }
+            }
         });
     }
     catch (error) {

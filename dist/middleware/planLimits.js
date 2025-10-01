@@ -39,16 +39,16 @@ const checkConsultationLimits = async (req, res, next) => {
         let monthlyLimit;
         switch (plan.name.toLowerCase()) {
             case 'basic':
-                monthlyLimit = 3;
+                monthlyLimit = 50;
                 break;
             case 'plus':
-                monthlyLimit = 5;
+                monthlyLimit = 100;
                 break;
             case 'complete':
                 monthlyLimit = -1;
                 break;
             default:
-                monthlyLimit = 0;
+                monthlyLimit = 10;
         }
         if (monthlyLimit === -1) {
             next();
