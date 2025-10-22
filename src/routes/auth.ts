@@ -294,7 +294,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
  * GET /auth/lawyers
  * Get list of active lawyers for consultation selection
  */
-router.get('/lawyers', requireAuth, async (req: Request, res: Response) => {
+router.get('/lawyers', requireAuth, async (_req: Request, res: Response) => {
   try {
     const lawyers = await User.find({
       role: 'lawyer',

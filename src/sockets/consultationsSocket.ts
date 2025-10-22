@@ -6,7 +6,6 @@ import User from '../models/User';
 
 // Session constants
 const MAX_SESSION_DURATION_MS = 60 * 60 * 1000; // 60 minutes
-const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
 // Active sessions tracking
 const activeSessions: Map<
@@ -15,6 +14,7 @@ const activeSessions: Map<
     consultationId: string;
     startTime: number;
     maxEndTime: number;
+    lastActivity?: number;
     idleTimer?: NodeJS.Timeout;
     sessionTimer?: NodeJS.Timeout;
   }
@@ -339,7 +339,7 @@ export const setupConsultationsSocket = (io: Server) => {
 /**
  * Start session timers (60 min max, 10 min idle) - for display only, no auto-close
  */
-function startSessionTimers(consultationId: string, namespace: any) {
+function startSessionTimers(consultationId: string, _namespace: any) {
   // Clear existing timers if any
   clearSessionTimers(consultationId);
 
@@ -360,7 +360,7 @@ function startSessionTimers(consultationId: string, namespace: any) {
 /**
  * Reset idle timer on activity - now just updates last activity time
  */
-function resetIdleTimer(consultationId: string, namespace: any) {
+function resetIdleTimer(consultationId: string, _namespace: any) {
   // Just track activity, no auto-close
   const session = activeSessions.get(consultationId);
   if (session) {

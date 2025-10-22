@@ -218,8 +218,6 @@ export const getConsultations = async (req: Request, res: Response) => {
       lawyer: c.lawyerId,
     }));
 
-    const total = await Consultation.countDocuments(query);
-
     return res.status(200).json(consultationsWithQuestion);
   } catch (error) {
     console.error('Get consultations error:', error);
@@ -346,7 +344,7 @@ export const acceptConsultation = async (req: Request, res: Response) => {
     }
 
     consultation.status = 'ACCEPTED';
-    consultation.lawyerId = lawyerId;
+    consultation.lawyerId = lawyerId as any;
     await consultation.save();
 
     await consultation.populate([
